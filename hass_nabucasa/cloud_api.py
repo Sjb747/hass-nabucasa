@@ -10,7 +10,9 @@ from typing import (
     Any,
     Concatenate,
     ParamSpec,
+    TypedDict,
     TypeVar,
+    cast,
 )
 
 from aiohttp import ClientResponse
@@ -23,6 +25,31 @@ T = TypeVar("T")
 
 if TYPE_CHECKING:
     from . import Cloud, _ClientT
+
+
+class _FilesHandlerUrlResponse(TypedDict):
+    """URL Response from files handler."""
+
+    url: str
+
+
+class FilesHandlerDownloadDetails(_FilesHandlerUrlResponse):
+    """Download details from files handler."""
+
+
+class FilesHandlerUploadDetails(_FilesHandlerUrlResponse):
+    """Upload details from files handler."""
+
+    fields: dict[str, str]
+
+
+class FilesHandlerListEntry(TypedDict):
+    """List entry for files handlers."""
+
+    key: str
+    size: int
+    last_modified: str
+    tags: dict[str, Any]
 
 
 def _do_log_response(resp: ClientResponse, content: str = "") -> None:
@@ -156,6 +183,58 @@ async def async_voice_connection_details(cloud: Cloud[_ClientT]) -> ClientRespon
 
 
 @_check_token
+async def async_files_download_details(
+    cloud: Cloud[_ClientT],
+    *,
+    storage_type: str,
+    filename: str,
+) -> FilesHandlerDownloadDetails:
+    """Get files download details."""
+    resp = await cloud.websession.get(
+        f"https://{cloud.servicehandlers_server}/files/download_details",
+        headers={"authorization": cloud.id_token, USER_AGENT: cloud.client.client_name},
+        json={
+            "storage_type": storage_type,
+            "filename": filename,
+        },
+    )
+
+    data: dict[str, Any] = await resp.json()
+    _do_log_response(
+        resp,
+        data["message"] if resp.status == 400 and "message" in data else "",
+    )
+    resp.raise_for_status()
+    return cast(FilesHandlerDownloadDetails, data)
+
+
+@_check_token
+async def async_files_list(
+    cloud: Cloud[_ClientT],
+    *,
+    storage_type: str,
+) -> list[FilesHandlerListEntry]:
+    """List files for storage type."""
+    resp = await cloud.websession.get(
+        f"https://{cloud.servicehandlers_server}/files/list",
+        headers={"authorization": cloud.id_token, USER_AGENT: cloud.client.client_name},
+        json={
+            "storage_type": storage_type,
+        },
+    )
+
+    data: dict[str, Any] | list[dict[str, Any]] = await resp.json()
+    _do_log_response(
+        resp,
+        data["message"]
+        if resp.status == 400 and isinstance(data, dict) and "message" in data
+        else "",
+    )
+    resp.raise_for_status()
+    return cast(list[FilesHandlerListEntry], data)
+
+
+@_check_token
 async def async_files_upload_details(
     cloud: Cloud[_ClientT],
     *,
@@ -163,7 +242,8 @@ async def async_files_upload_details(
     filename: str,
     base64md5hash: str,
     size: int,
-) -> dict[str, Any]:
+    homeassistant_version: str | None = None,
+) -> FilesHandlerUploadDetails:
     """Get files upload details."""
     resp = await cloud.websession.get(
         f"https://{cloud.servicehandlers_server}/files/upload_details",
@@ -171,6 +251,7 @@ async def async_files_upload_details(
         json={
             "storage_type": storage_type,
             "filename": filename,
+            "homeassistant_version": homeassistant_version,
             "md5": base64md5hash,
             "size": size,
         },
@@ -182,7 +263,7 @@ async def async_files_upload_details(
         data["message"] if "message" in data and resp.status == 400 else "",
     )
     resp.raise_for_status()
-    return data
+    return cast(FilesHandlerUploadDetails, data)
 
 
 @_check_token
